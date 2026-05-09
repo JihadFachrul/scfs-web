@@ -41,10 +41,8 @@ Route::middleware(['auth'])->group(function () {
         } elseif ($user->role === 'merchant') {
             return redirect()->route('merchant.dashboard');
         } elseif ($user->role === 'pemasok') {
-            // [PERBAIKAN 1] Tambahkan logika redirect untuk Pemasok
             return redirect()->route('pemasok.dashboard'); 
         } else {
-            // (Nanti role mahasiswa, investor bisa ditambahkan di atas ini)
             return redirect()->route('profile'); 
         }
     })->name('dashboard');
@@ -58,7 +56,6 @@ Route::middleware(['auth'])->group(function () {
     // ADMIN ROUTES
     // ----------------------------------------------------------
     Volt::route('/admin/dashboard', 'dashboard.admin')->name('admin.dashboard');
-
     Volt::route('/admin/users', 'admin.user-management')->name('admin.users.index');
 
     // Mahasiswa
@@ -106,42 +103,30 @@ Route::middleware(['auth'])->group(function () {
     Volt::route('/approval/pemasok', 'lkbb.approval.pemasok')->name('approval.pemasok');
     Volt::route('/riwayat/mahasiswa/detail/{id}', 'lkbb.riwayat.detail-mahasiswa')->name('lkbb.riwayat.detail-mahasiswa');
 
-    // Keuangan
+    // Keuangan LKBB
     Volt::route('/keuangan/merchant', 'lkbb.keuangan.merchant')->name('keuangan.merchant');
     Volt::route('/keuangan/pemasok', 'lkbb.keuangan.pemasok')->name('keuangan.pemasok');
     Volt::route('/keuangan/mahasiswa', 'lkbb.keuangan.mahasiswa')->name('saldo.bantuan');
     Volt::route('/keuangan/pencairan', 'lkbb.keuangan.pencairan')->name('keuangan.pencairan');
     Volt::route('/keuangan/penagihan', 'lkbb.keuangan.penagihan')->name('keuangan.penagihan');
-
-    // riwat dan detail
+    
+    // [ROUTE BARU] Riwayat Fee & Setoran
+    Volt::route('/keuangan/riwayat-fee', 'lkbb.keuangan.riwayat-fee')->name('keuangan.riwayat-fee');
+    
+    // Approval Withdraw Dipisah
+    Volt::route('/keuangan/approval-withdraw-merchant', 'lkbb.keuangan.withdraw-merchant-approval')->name('lkbb.withdraw.merchant.approval');
+    Volt::route('/keuangan/approval-withdraw-pemasok', 'lkbb.keuangan.withdraw-pemasok-approval')->name('lkbb.withdraw.pemasok.approval');
+    
+    // Riwayat dan detail
     Volt::route('/lkbb/riwayat-approval', 'lkbb.riwayat.riwayat-approval-mahasiswa')->name('lkbb.riwayat');
     Volt::route('/lkbb/riwayat/mahasiswa/{id}', 'lkbb.riwayat.detail-mahasiswa')->name('lkbb.mahasiswa.detail');
 
-    Volt::route('/lkbb/approval-scf', 'lkbb.supply-chain.approval')
-    ->name('lkbb.scf.approval');
-    // ----------------------------------------------------------
-    // RUTE DASHBOARD MERCHANT
-    // ----------------------------------------------------------
-    Volt::route('/merchant/dashboard', 'dashboard.merchant')->name('merchant.dashboard');
+    Volt::route('/lkbb/approval-scf', 'lkbb.supply-chain.approval')->name('lkbb.scf.approval');
     
     // ----------------------------------------------------------
-    // PEMASOK ROUTES
+    // MERCHANT ROUTES (Sudah diamankan ke dalam middleware auth)
     // ----------------------------------------------------------
-    // [PERBAIKAN 2] Daftarkan rute dashboard pemasok yang mengarah ke file Livewire Volt kita
-    Volt::route('/pemasok/dashboard', 'dashboard.pemasok')->name('pemasok.dashboard');
-
-    Route::get('/pemasok/inventaris', ManajemenProduk::class)->name('pemasok.inventaris');
-    Route::get('/pemasok/profil', ProfilePemasok::class)->name('pemasok.profil');
-   
-    Route::get('/pemasok/laporan', \App\Livewire\Pemasok\LaporanAnalitik::class)->name('pemasok.laporan');
-   // Di dalam grup middleware pemasok Anda:
-    Route::get('/pemasok/riwayat-produksi', RiwayatProduksi::class)->name('pemasok.riwayat-produksi');
-    Route::get('/pemasok/pesanan-masuk', PesananMasuk::class)->name('pemasok.pesanan-masuk');
-    Route::get('/pemasok/pengajuan-dana-lkbb', PengajuanDanaLkbb::class)->name('pemasok.pengajuan-dana-lkbb');
-    Route::get('/pemasok/tarik-dana', TarikDana::class)->name('pemasok.tarik-dana');
-    Route::get('/pemasok/pengiriman', PengirimanLogistik::class)->name('pemasok.pengiriman');
-});
-
+    Volt::route('/merchant/dashboard', 'dashboard.merchant')->name('merchant.dashboard');
     Volt::route('/merchant/scan', 'merchant.scan-qr')->name('merchant.scan');
     Volt::route('/merchant/withdraw', 'merchant.withdraw')->name('merchant.withdraw');
     Volt::route('/merchant/katalog', 'merchant.katalog')->name('merchant.katalog');
@@ -152,5 +137,19 @@ Route::middleware(['auth'])->group(function () {
     Volt::route('/merchant/setoran', 'merchant.setoran')->name('merchant.setoran');
     Volt::route('/merchant/top-up', 'merchant.top-up')->name('merchant.top-up');
 
+    // ----------------------------------------------------------
+    // PEMASOK ROUTES
+    // ----------------------------------------------------------
+    Volt::route('/pemasok/dashboard', 'dashboard.pemasok')->name('pemasok.dashboard');
+    Route::get('/pemasok/inventaris', ManajemenProduk::class)->name('pemasok.inventaris');
+    Route::get('/pemasok/profil', ProfilePemasok::class)->name('pemasok.profil');
+    Route::get('/pemasok/laporan', LaporanAnalitik::class)->name('pemasok.laporan');
+    Route::get('/pemasok/riwayat-produksi', RiwayatProduksi::class)->name('pemasok.riwayat-produksi');
+    Route::get('/pemasok/pesanan-masuk', PesananMasuk::class)->name('pemasok.pesanan-masuk');
+    Route::get('/pemasok/pengajuan-dana-lkbb', PengajuanDanaLkbb::class)->name('pemasok.pengajuan-dana-lkbb');
+    Route::get('/pemasok/tarik-dana', TarikDana::class)->name('pemasok.tarik-dana');
+    Route::get('/pemasok/pengiriman', PengirimanLogistik::class)->name('pemasok.pengiriman');
+
+}); // PENUTUP MIDDLEWARE AUTH (Semua rute di atas aman!)
 
 require __DIR__.'/auth.php';

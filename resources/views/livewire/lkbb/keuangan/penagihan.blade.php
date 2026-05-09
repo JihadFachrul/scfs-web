@@ -1,14 +1,11 @@
 <?php
 
 use Livewire\Volt\Component;
-use Livewire\WithPagination;
 use Livewire\Attributes\Layout;
-use App\Models\User;
-use App\Models\Transaction;
-use App\Models\Wallet;
-use App\Models\LedgerEntry;
+use Livewire\Attributes\Computed;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
+use App\Models\SetoranTunai;
+use App\Models\MerchantProfile;
 
 new #[Layout('layouts.lkbb')] class extends Component {
     use WithPagination;
@@ -33,7 +30,8 @@ new #[Layout('layouts.lkbb')] class extends Component {
         $this->resetPage();
     }
 
-    public function with()
+    #[Computed]
+    public function riwayatHariIni()
     {
         // Mengambil transaksi dengan tipe 'tagihan_merchant'
         $tagihan = Transaction::with('user')
@@ -66,36 +64,39 @@ new #[Layout('layouts.lkbb')] class extends Component {
         if (!$trx || $trx->status !== 'pending') return;
 
         try {
-            DB::transaction(function () use ($trx) {
-                // 1. Ubah status tagihan menjadi lunas ('success')
-                $trx->update([
-                    'status' => 'success',
-                    'description' => $trx->description . ' (Telah disetorkan tunai ke LKBB)'
+            DB::transaction(function () use ($setId, $petugas) {
+                
+                $setoran = SetoranTunai::where('id', $setId)
+                                ->lockForUpdate()
+                                ->firstOrFail();
+
+                $merchant = MerchantProfile::where('user_id', $setoran->merchant_id)
+                                ->lockForUpdate()
+                                ->firstOrFail();
+
+                $setoran->update([
+                    'status' => 'selesai',
+                    'nama_petugas' => $petugas
                 ]);
 
-                // 2. Tambahkan saldo ke Brankas Sistem (LKBB_MASTER)
-                // Karena uang fisiknya sudah diterima oleh Admin LKBB
-                $lkbbWallet = Wallet::firstOrCreate(
-                    ['type' => 'LKBB_MASTER'],
-                    ['account_number' => 'SYS-LKBB-001', 'balance' => 0, 'is_active' => true]
-                );
-
-                $lkbbWallet->increment('balance', $trx->total_amount);
-
-                // 3. Catat di Buku Besar sistem
-                LedgerEntry::create([
-                    'transaction_id' => $trx->id,
-                    'wallet_id' => $lkbbWallet->id,
-                    'entry_type' => 'CREDIT',
-                    'amount' => $trx->total_amount,
-                    'balance_after' => $lkbbWallet->fresh()->balance,
-                ]);
+                $hutangLama = (float) $merchant->tagihan_setoran_tunai;
+                $nominalSetor = (float) $setoran->nominal;
+                
+                $hutangBaru = max(0, $hutangLama - $nominalSetor);
+                $merchant->update(['tagihan_setoran_tunai' => $hutangBaru]);
             });
 
-            session()->flash('message', 'Setoran tunai sebesar Rp ' . number_format($trx->total_amount, 0, ',', '.') . ' dari ' . $trx->user->name . ' berhasil diterima dan dilunaskan!');
+            $this->isModalOpen = false;
+            $this->selectedSetoranId = null;
+            $this->nama_petugas = '';
+            
+            unset($this->tiketPending); 
+            unset($this->riwayatHariIni); 
+
+            session()->flash('success', 'Uang tunai berhasil diterima dan hutang kantin telah lunas!');
+
         } catch (\Exception $e) {
-            report($e);
-            session()->flash('error', 'Terjadi kesalahan sistem saat memproses pelunasan.');
+            session()->flash('error', 'Gagal memproses: ' . $e->getMessage());
         }
 
         $this->showConfirmModal = false;
@@ -142,11 +143,10 @@ new #[Layout('layouts.lkbb')] class extends Component {
                 + Simulasi Tagihan
             </button>
         </div>
-    </div>
-
-    @if (session()->has('message'))
-        <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4 shadow-sm">
-            <strong class="font-bold">Berhasil!</strong> {{ session('message') }}
+    @endif
+    @if(session('error'))
+        <div class="bg-rose-50 border border-rose-200 text-rose-800 px-4 py-3 rounded-xl mb-4">
+            <span class="font-bold">{{ session('error') }}</span>
         </div>
     @endif
 
@@ -206,37 +206,23 @@ new #[Layout('layouts.lkbb')] class extends Component {
                             </td>
                         </tr>
                     @empty
-                        <tr>
-                            <td colspan="5" class="px-6 py-10 text-center text-gray-500">
-                                Tidak ada data tagihan untuk tab <strong>{{ $tab === 'pending' ? 'Belum Disetor' : 'Lunas' }}</strong>.
-                            </td>
-                        </tr>
+                        <li class="p-8 text-center text-sm text-gray-500 font-medium">Belum ada uang fisik yang diterima hari ini.</li>
                     @endforelse
-                </tbody>
-            </table>
+                </ul>
+            </div>
         </div>
-        @if($daftarTagihan->hasPages())
-            <div class="px-6 py-4 border-t border-gray-200 bg-gray-50">{{ $daftarTagihan->links() }}</div>
-        @endif
     </div>
 
-    @if($showSimulasiModal)
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-        <div class="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <h3 class="text-lg font-bold text-gray-900 mb-1">Simulasi Tagihan Merchant</h3>
-            <p class="text-xs text-gray-500 mb-6">Buat tagihan seolah-olah Merchant baru saja menerima pembayaran tunai dari Mahasiswa.</p>
-
-            <form wire:submit="submitSimulasi">
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Pilih Merchant</label>
-                    <select wire:model="simulasiUserId" class="w-full border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-sm py-2 px-3">
-                        <option value="">-- Pilih Merchant --</option>
-                        @foreach($merchants as $merchant)
-                            <option value="{{ $merchant->id }}">{{ $merchant->name }}</option>
-                        @endforeach
-                    </select>
-                    @error('simulasiUserId') <span class="text-red-500 text-xs mt-1 block">{{ $message }}</span> @enderror
+    @if($isModalOpen)
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" x-data x-transition>
+            <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-7 relative">
+                <div class="flex justify-center mb-5">
+                    <div class="p-3.5 bg-blue-50 text-blue-600 rounded-full">
+                        <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2z" /></svg>
+                    </div>
                 </div>
+                <h3 class="text-xl font-bold text-center text-gray-900 mb-1">Konfirmasi Setoran</h3>
+                <p class="text-sm text-center text-gray-500 mb-6 leading-relaxed">Siapa nama petugas LKBB yang membawa uang fisik ini ke kantor?</p>
                 
                 <div class="mb-6">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Nominal Tunai (Rp)</label>

@@ -16,16 +16,17 @@ new class extends Component
     // Logika untuk mendeteksi menu mana yang sedang aktif
     $isApprovalActive = request()->routeIs('approval.*', 'supply-chain.approval');
     $isMasterDompetActive = request()->is('keuangan/mahasiswa*', 'keuangan/merchant*', 'keuangan/pemasok*') || request()->routeIs('saldo.bantuan');
-    
-    // UPDATE: Menambahkan rute lkbb.scf.approval ke dalam pengecekan Operasional
     $isOperasionalActive = request()->routeIs('supply-chain.create', 'supply-chain.bills', 'lkbb.scf.approval');
     
-    $isKeuanganActive = request()->is('keuangan/pencairan*', 'keuangan/penagihan*') || request()->routeIs('lkbb.wallets');
+    // PERBAIKAN: Logika dipisah untuk menu Setoran dan menu Withdraw
+    $isSetoranActive = request()->routeIs('keuangan.penagihan', 'keuangan.riwayat-fee');
+    $isKeuanganActive = request()->is('keuangan/pencairan*') || request()->routeIs('lkbb.wallets', 'lkbb.withdraw.merchant.approval', 'lkbb.withdraw.pemasok.approval');
 @endphp
 
 <aside 
+    x-data="{ sidebarOpen: true }"
     :class="sidebarOpen ? 'w-72' : 'w-20'"
-    class="bg-white border-r border-gray-200 min-h-screen flex-col transition-all duration-300 ease-in-out relative hidden md:flex z-40"
+    class="bg-white border-r border-gray-200 h-screen sticky top-0 flex flex-col transition-all duration-300 ease-in-out z-40 hidden md:flex"
 >
     
     <button 
@@ -51,7 +52,7 @@ new class extends Component
         </div>
     </div>
 
-    <nav class="flex-1 px-3 py-6 space-y-1.5 overflow-y-auto overflow-x-hidden">
+    <nav class="flex-1 px-3 py-6 space-y-1.5 overflow-y-auto overflow-x-hidden [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-gray-200 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-gray-300">
         
         <div x-show="sidebarOpen" x-transition class="px-4 mb-2 mt-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">
             Menu Utama
@@ -71,7 +72,7 @@ new class extends Component
             Verifikasi & Approval
         </div>
 
-        <div x-data="{ approvalOpen: {{ $isApprovalActive ? 'true' : 'false' }} }" class="mt-1">
+        <div x-data="{ approvalOpen: true }" class="mt-1">
             <button @click="if(!sidebarOpen) sidebarOpen = true; approvalOpen = !approvalOpen" 
                     class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 group {{ $isApprovalActive ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900' }}"
                     :class="sidebarOpen ? '' : 'justify-center'" title="Verifikasi & Approval">
@@ -84,15 +85,12 @@ new class extends Component
 
             <div x-show="approvalOpen && sidebarOpen" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 -translate-y-2" x-transition:enter-end="opacity-100 translate-y-0" class="mt-1 space-y-1 px-2">
                 <a href="{{ route('approval.mahasiswa') }}" class="flex items-center pl-10 pr-4 py-2 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('approval.mahasiswa') ? 'text-blue-700 bg-blue-50/50 font-bold' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50' }}">
-                    <svg class="w-4 h-4 mr-3 {{ request()->routeIs('approval.mahasiswa') ? 'text-blue-600' : '' }}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
                     Mahasiswa
                 </a>
                 <a href="{{ route('approval.merchant') }}" class="flex items-center pl-10 pr-4 py-2 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('approval.merchant') ? 'text-blue-700 bg-blue-50/50 font-bold' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50' }}">
-                    <svg class="w-4 h-4 mr-3 {{ request()->routeIs('approval.merchant') ? 'text-blue-600' : '' }}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
                     Merchant
                 </a>
                 <a href="{{ route('approval.pemasok') }}" class="flex items-center pl-10 pr-4 py-2 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('approval.pemasok') ? 'text-blue-700 bg-blue-50/50 font-bold' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50' }}">
-                    <svg class="w-4 h-4 mr-3 {{ request()->routeIs('approval.pemasok') ? 'text-blue-600' : '' }}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0zM13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" /></svg>
                     Pemasok
                 </a>
             </div>
@@ -102,7 +100,7 @@ new class extends Component
             Data Saldo
         </div>
 
-        <div x-data="{ masterDompetOpen: {{ $isMasterDompetActive ? 'true' : 'false' }} }" class="mt-1">
+        <div x-data="{ masterDompetOpen: true }" class="mt-1">
             <button @click="if(!sidebarOpen) sidebarOpen = true; masterDompetOpen = !masterDompetOpen" 
                     class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 group {{ $isMasterDompetActive ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900' }}"
                     :class="sidebarOpen ? '' : 'justify-center'" title="Master Dompet">
@@ -130,7 +128,7 @@ new class extends Component
             Operasional
         </div>
 
-        <div x-data="{ operasionalOpen: {{ $isOperasionalActive ? 'true' : 'false' }} }" class="mt-1">
+        <div x-data="{ operasionalOpen: true }" class="mt-1">
             <button @click="if(!sidebarOpen) sidebarOpen = true; operasionalOpen = !operasionalOpen" 
                     class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 group {{ $isOperasionalActive ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900' }}"
                     :class="sidebarOpen ? '' : 'justify-center'" title="Rantai Pasok">
@@ -156,17 +154,52 @@ new class extends Component
             </div>
         </div>
 
+        {{-- ========================================== --}}
+        {{-- MENU BARU: KAS & PENAGIHAN (WARNA AMBER)   --}}
+        {{-- ========================================== --}}
         <div x-show="sidebarOpen" x-transition class="px-4 mb-1 mt-6 text-[10px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">
-            Arus Kas
+            Kas & Penagihan
         </div>
 
-        <div x-data="{ keuanganOpen: {{ $isKeuanganActive ? 'true' : 'false' }} }" class="mt-1">
+        <div x-data="{ setoranOpen: true }" class="mt-1">
+            <button @click="if(!sidebarOpen) sidebarOpen = true; setoranOpen = !setoranOpen" 
+                    class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 group {{ $isSetoranActive ? 'bg-amber-50 text-amber-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900' }}"
+                    :class="sidebarOpen ? '' : 'justify-center'" title="Setoran Merchant">
+                <div class="flex items-center">
+                    <svg class="w-5 h-5 flex-shrink-0 {{ $isSetoranActive ? 'text-amber-600' : 'text-gray-400 group-hover:text-gray-500' }} transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                    </svg>
+                    <span x-show="sidebarOpen" class="ml-3 font-semibold whitespace-nowrap">Setoran Merchant</span>
+                </div>
+                <svg x-show="sidebarOpen" :class="{'rotate-180': setoranOpen}" class="w-4 h-4 {{ $isSetoranActive ? 'text-amber-600' : 'text-gray-400' }} transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+
+            <div x-show="setoranOpen && sidebarOpen" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 -translate-y-2" x-transition:enter-end="opacity-100 translate-y-0" class="mt-1 space-y-1 px-2">
+                <a href="{{ route('keuangan.penagihan') }}" class="flex items-center pl-10 pr-4 py-2 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('keuangan.penagihan') ? 'text-amber-700 bg-amber-50/50 font-bold' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50' }}">
+                    Penagihan Tunai
+                </a>
+                <a href="{{ route('keuangan.riwayat-fee') }}" class="flex items-center pl-10 pr-4 py-2 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('keuangan.riwayat-fee') ? 'text-amber-700 bg-amber-50/50 font-bold' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50' }}">
+                    Riwayat & Audit Fee
+                </a>
+            </div>
+        </div>
+
+        {{-- ========================================== --}}
+        {{-- ARUS KAS DIGITAL (BERFOKUS PADA WITHDRAW)  --}}
+        {{-- ========================================== --}}
+        <div x-show="sidebarOpen" x-transition class="px-4 mb-1 mt-6 text-[10px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">
+            Arus Kas Digital
+        </div>
+
+        <div x-data="{ keuanganOpen: true }" class="mt-1">
             <button @click="if(!sidebarOpen) sidebarOpen = true; keuanganOpen = !keuanganOpen" 
                     class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 group {{ $isKeuanganActive ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900' }}"
-                    :class="sidebarOpen ? '' : 'justify-center'" title="Keuangan">
+                    :class="sidebarOpen ? '' : 'justify-center'" title="Withdraw & Settlement">
                 <div class="flex items-center">
                     <svg class="w-5 h-5 flex-shrink-0 {{ $isKeuanganActive ? 'text-blue-600' : 'text-gray-400 group-hover:text-gray-500' }} transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    <span x-show="sidebarOpen" class="ml-3 font-semibold whitespace-nowrap">Keuangan & Settlement</span>
+                    <span x-show="sidebarOpen" class="ml-3 font-semibold whitespace-nowrap">Withdraw & Settlement</span>
                 </div>
                 <svg x-show="sidebarOpen" :class="{'rotate-180': keuanganOpen}" class="w-4 h-4 {{ $isKeuanganActive ? 'text-blue-600' : 'text-gray-400' }} transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
             </button>
@@ -175,11 +208,14 @@ new class extends Component
                 <a href="{{ route('lkbb.wallets') }}" class="flex items-center pl-10 pr-4 py-2 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('lkbb.wallets') ? 'text-blue-700 bg-blue-50/50 font-bold' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50' }}">
                     Saldo & Wallet Utama
                 </a>
-                <a href="{{ route('keuangan.pencairan') }}" class="flex items-center pl-10 pr-4 py-2 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('keuangan.pencairan') ? 'text-blue-700 bg-blue-50/50 font-bold' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50' }}">
-                    Pencairan Dana
+                <a href="{{ route('lkbb.withdraw.merchant.approval') }}" class="flex items-center pl-10 pr-4 py-2 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('lkbb.withdraw.merchant.approval') ? 'text-blue-700 bg-blue-50/50 font-bold' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50' }}">
+                    Approval WD Merchant
                 </a>
-                <a href="{{ route('keuangan.penagihan') }}" class="flex items-center pl-10 pr-4 py-2 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('keuangan.penagihan') ? 'text-blue-700 bg-blue-50/50 font-bold' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50' }}">
-                    Penagihan Tunai
+                <a href="{{ route('lkbb.withdraw.pemasok.approval') }}" class="flex items-center pl-10 pr-4 py-2 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('lkbb.withdraw.pemasok.approval') ? 'text-blue-700 bg-blue-50/50 font-bold' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50' }}">
+                    Approval WD Pemasok
+                </a>
+                <a href="{{ route('keuangan.pencairan') }}" class="flex items-center pl-10 pr-4 py-2 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('keuangan.pencairan') ? 'text-blue-700 bg-blue-50/50 font-bold' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50' }}">
+                    Log Pencairan Selesai
                 </a>
             </div>
         </div>
@@ -187,7 +223,7 @@ new class extends Component
         <div class="h-4"></div>
     </nav>
 
-    <div class="p-4 border-t border-gray-100 bg-gray-50/50 shrink-0">
+    <div class="p-4 border-t border-gray-100 bg-gray-50/50 shrink-0 mt-auto">
         <div class="flex items-center gap-3 mb-4 px-1" :class="sidebarOpen ? '' : 'justify-center'">
             <div class="h-9 w-9 flex-shrink-0 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-sm shadow-sm border border-blue-200">
                 {{ substr(Auth::user()->name ?? 'L', 0, 2) }}
