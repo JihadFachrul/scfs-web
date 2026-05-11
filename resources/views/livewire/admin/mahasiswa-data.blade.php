@@ -23,7 +23,7 @@ class extends Component {
     public $isAjukanModalOpen = false;
     public $ajukanUserId = null;
     public $ajukanNama = '';
-    public $ajukanNominal = 500000; // Default saran nominal
+    public $ajukanNominal = '500.000'; // Default string format rupiah
 
     public function getStudentsProperty()
     {
@@ -63,7 +63,7 @@ class extends Component {
     {
         $this->ajukanUserId = $userId;
         $this->ajukanNama = $nama;
-        $this->ajukanNominal = 500000; // Reset ke default tiap buka modal
+        $this->ajukanNominal = '500.000'; // Reset ke default tiap buka modal
         $this->isAjukanModalOpen = true;
     }
 
@@ -75,19 +75,23 @@ class extends Component {
 
     public function submitAjukan()
     {
-        $this->validate([
-            'ajukanNominal' => 'required|numeric|min:10000' // Minimal pengajuan 10rb
-        ]);
+        // Bersihkan titik dari input string
+        $cleanNominal = str_replace('.', '', $this->ajukanNominal);
+
+        if (!is_numeric($cleanNominal) || $cleanNominal < 10000) {
+            $this->addError('ajukanNominal', 'Minimal pengajuan Rp 10.000');
+            return;
+        }
 
         $user = User::with('mahasiswaProfile')->find($this->ajukanUserId);
         
         if ($user && $user->mahasiswaProfile) {
             $profil = $user->mahasiswaProfile;
             
-            // 1. Buat record baru di tabel pengajuan_bantuans dengan nominal yang diinput admin
+            // 1. Buat record baru di tabel pengajuan_bantuans dengan nominal bersih
             PengajuanBantuan::create([
                 'mahasiswa_profile_id' => $profil->id,
-                'nominal' => $this->ajukanNominal,
+                'nominal' => $cleanNominal,
                 'status' => 'diajukan',
                 'nomor_pengajuan' => 'SC-' . date('Y') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT)
             ]);
@@ -97,7 +101,7 @@ class extends Component {
         }
 
         $this->closeAjukanModal();
-        session()->flash('message', 'Pengajuan dana sebesar Rp ' . number_format($this->ajukanNominal, 0, ',', '.') . ' berhasil dikirim ke antrean LKBB.');
+        session()->flash('message', 'Pengajuan dana sebesar Rp ' . number_format($cleanNominal, 0, ',', '.') . ' berhasil dikirim ke antrean LKBB.');
     }
 
     // =====================================
@@ -188,8 +192,8 @@ class extends Component {
             @foreach(['Semua', 'Belum Diajukan', 'Diajukan', 'Disetujui'] as $tab)
                 <button 
                     wire:click="$set('activeTab', '{{ $tab }}')"
-                    class="px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap
-                    {{ $activeTab === $tab ? 'bg-white text-gray-900 shadow-sm ring-1 ring-gray-200' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50' }}">
+                    class="px-4 py-2 text-sm rounded-xl transition-all whitespace-nowrap
+                    {{ $activeTab === $tab ? 'bg-blue-600 text-white shadow-md font-bold' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100 font-medium' }}">
                     {{ $tab }}
                 </button>
             @endforeach
@@ -309,7 +313,12 @@ class extends Component {
                     <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Input Nominal Bantuan (Rp)</label>
                     <div class="relative">
                         <span class="absolute inset-y-0 left-0 flex items-center pl-4 font-bold text-gray-500">Rp</span>
-                        <input wire:model="ajukanNominal" type="number" step="10000" class="w-full text-base font-bold text-gray-900 rounded-xl border-gray-300 focus:border-blue-500 focus:ring-blue-500 bg-white py-3 pl-12 pr-4 shadow-sm" placeholder="Contoh: 500000">
+                        <input wire:model="ajukanNominal" 
+                               type="text" 
+                               x-data 
+                               x-on:input="$el.value = $el.value.replace(/[^0-9]/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, '.')"
+                               class="w-full text-base font-bold text-gray-900 rounded-xl border-gray-300 focus:border-blue-500 focus:ring-blue-500 bg-white py-3 pl-12 pr-4 shadow-sm" 
+                               placeholder="Contoh: 500.000">
                     </div>
                     @error('ajukanNominal') <span class="text-xs text-red-500 mt-1 block font-medium">{{ $message }}</span> @enderror
                     <p class="text-[10px] text-gray-400 mt-1.5 italic">*Nominal ini akan dikirim ke antrean persetujuan LKBB.</p>

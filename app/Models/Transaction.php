@@ -9,7 +9,9 @@ class Transaction extends Model
     protected $fillable = [
         'order_id', 
         'user_id', 
-        'merchant_id',  // <--- Tambahan baru
+        'merchant_id', 
+        'sender_wallet_id',   // <--- PASTIKAN INI ADA
+        'receiver_wallet_id', // <--- Tambahan baru
         'type', 
         'status', 
         'total_amount', 
@@ -32,5 +34,15 @@ class Transaction extends Model
     public function merchant()
     {
         return $this->belongsTo(User::class, 'merchant_id');
+    }
+
+    public function senderWallet()
+    {
+        return $this->belongsTo(Wallet::class, 'sender_wallet_id');
+    }
+
+    public function receiverWallet()
+    {
+        return $this->belongsTo(Wallet::class, 'receiver_wallet_id');
     }
 }

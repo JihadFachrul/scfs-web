@@ -3,8 +3,7 @@
 use Livewire\Volt\Component;
 use Livewire\Attributes\Layout;
 use App\Models\Transaction;
-use App\Models\Wallet;       // <--- Import Wallet
-use App\Models\LedgerEntry;  // <--- Import Ledger
+use App\Models\Wallet;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -17,64 +16,71 @@ class extends Component {
     public function with()
     {
         // ---------------------------------------------------------
-        // 1. DATA KARTU (REAL-TIME BALANCE DARI WALLET)
+        // 1. DATA KARTU (REAL-TIME BALANCE DARI 3 BRANKAS LKBB)
         // ---------------------------------------------------------
         
-        // A. MODAL KERJA (Saldo Real Dompet LKBB)
-        $lkbbWallet = Wallet::where('type', 'LKBB_MASTER')->first();
-        $modalKerja = $lkbbWallet ? $lkbbWallet->balance : 0;
+        // A. DOMPET INVESTASI (Sumber Modal Ekosistem)
+        $walletInvestasi = Wallet::where('type', 'LKBB_INVESTMENT')->first();
+        $saldoInvestasi = $walletInvestasi ? $walletInvestasi->balance : 0;
 
-        // B. SALDO DONASI TERSEDIA
-        $walletDonasi = Wallet::where('type', 'DONATION_POOL')->first();
-        
-        // PASTIKAN ADA TITIK KOMA (;) DI AKHIR BARIS INI 👇
-        $saldoDonasi = $walletDonasi 
-            ? $walletDonasi->balance 
-            : Transaction::where('type', 'donation')->where('status', 'lunas')->sum('total_amount');
+        // B. DOMPET DONASI (Sumber Beasiswa Mahasiswa)
+        $walletDonasi = Wallet::where('type', 'LKBB_DONATION')->first();
+        $saldoDonasi = $walletDonasi ? $walletDonasi->balance : 0;
 
-        // C. TAGIHAN MERCHANT (Piutang)
-        $tagihanMerchant = Transaction::where('type', 'loan') 
-            ->where('status', 'pending') 
-            ->sum('total_amount');
+        // C. DOMPET OPERASIONAL (Keuntungan Bersih LKBB dari Fee Transaksi)
+        $walletOperasional = Wallet::where('type', 'LKBB_OPERATIONAL')->first();
+        $saldoOperasional = $walletOperasional ? $walletOperasional->balance : 0;
 
-        // D. PROFIT / PENDAPATAN
-        $totalTrxBulanIni = Transaction::where('status', 'lunas')
+        // D. TOTAL PERPUTARAN UANG (Volume Ekosistem Bulan Ini)
+        $trxBulanIni = Transaction::where('status', 'lunas') // Asumsi transaksi sukses
             ->whereMonth('created_at', Carbon::now()->month)
             ->sum('total_amount');
-        $profit = $totalTrxBulanIni * 0.05;
-
 
         // ---------------------------------------------------------
-        // 2. DATA GRAFIK (Cash Flow Real dari Ledger)
+        // 2. DATA GRAFIK (Cash Flow & Volume)
         // ---------------------------------------------------------
         
-        // Mengambil histori uang masuk (CREDIT) ke Wallet LKBB 6 bulan terakhir
-        // Ini lebih akurat daripada tabel Transaction karena mencatat mutasi uang asli
-        $cashflowData = [];
-        if ($lkbbWallet) {
-            $cashflowData = Transaction::select(
-                    DB::raw('SUM(total_amount) as total'),
-                    DB::raw('MONTH(created_at) as month')
-                )
-                // Kita ambil dari transaksi donasi yang sukses (lunas)
-                ->where('type', 'donation') 
-                ->where('status', 'lunas')
-                ->where('created_at', '>=', Carbon::now()->subMonths(6))
-                ->groupBy('month')
-                ->pluck('total', 'month')
-                ->toArray();
-        }
+        // Grafik 1: Pergerakan Uang di Sistem (6 Bulan Terakhir)
+        $cashflowData = Transaction::select(
+                DB::raw('SUM(total_amount) as total'),
+                DB::raw('MONTH(created_at) as month')
+            )
+            ->where('status', 'lunas')
+            ->where('created_at', '>=', Carbon::now()->subMonths(6))
+            ->groupBy('month')
+            ->pluck('total', 'month')
+            ->toArray();
         
-        // Mapping data chart
         $chartLabels = [];
         $chartValues = [];
         for ($i = 5; $i >= 0; $i--) {
             $date = Carbon::now()->subMonths($i);
-            $monthNum = $date->month;
             $chartLabels[] = $date->format('M');
-            $chartValues[] = $cashflowData[$monthNum] ?? 0;
+            $chartValues[] = $cashflowData[$date->month] ?? 0;
         }
 
+        // Grafik 2: Volume Transaksi Harian (7 Hari Terakhir)
+        $dailyVolumeData = Transaction::select(
+                DB::raw('DATE(created_at) as date'), 
+                DB::raw('COUNT(*) as total_trx')
+            )
+            ->where('created_at', '>=', Carbon::now()->subDays(7))
+            ->groupBy('date')
+            ->orderBy('date', 'ASC')
+            ->get();
+            
+        $lineChartLabels = [];
+        $lineChartValues = [];
+        
+        for ($i = 6; $i >= 0; $i--) {
+            $date = Carbon::now()->subDays($i)->format('Y-m-d');
+            $dayName = Carbon::now()->subDays($i)->isoFormat('ddd');
+            
+            $record = $dailyVolumeData->firstWhere('date', $date);
+            
+            $lineChartLabels[] = $dayName;
+            $lineChartValues[] = $record ? $record->total_trx : 0;
+        }
 
         // ---------------------------------------------------------
         // 3. TABEL TRANSAKSI TERBARU
@@ -84,57 +90,31 @@ class extends Component {
             ->take(5)
             ->get();
 
-        // BARU: Data Volume Transaksi Harian (Untuk Line Chart Sebelah Kanan)
-        $dailyVolumeData = Transaction::select(
-                DB::raw('DATE(created_at) as date'), 
-                DB::raw('COUNT(*) as total_trx')
-            )
-            ->where('created_at', '>=', Carbon::now()->subDays(7)) // 7 Hari terakhir
-            ->groupBy('date')
-            ->orderBy('date', 'ASC')
-            ->get();
-            
-        $lineChartLabels = [];
-        $lineChartValues = [];
-        
-        // Loop 7 hari terakhir agar grafik tetap jalan meski hari itu 0 transaksi
-        for ($i = 6; $i >= 0; $i--) {
-            $date = Carbon::now()->subDays($i)->format('Y-m-d');
-            $dayName = Carbon::now()->subDays($i)->isoFormat('ddd'); // Sen, Sel, Rab...
-            
-            $record = $dailyVolumeData->firstWhere('date', $date);
-            
-            $lineChartLabels[] = $dayName;
-            $lineChartValues[] = $record ? $record->total_trx : 0;
-        }
-
         return [
-            'modalKerja' => $modalKerja,
+            'saldoInvestasi' => $saldoInvestasi,
             'saldoDonasi' => $saldoDonasi,
-            'tagihanMerchant' => $tagihanMerchant,
-            'profit' => $profit,
-            'recentTransactions' => $recentTransactions,
+            'saldoOperasional' => $saldoOperasional,
+            'trxBulanIni' => $trxBulanIni,
+            
+            // Grafik
             'chartLabels' => $chartLabels,
             'chartValues' => $chartValues,
-
-            // Grafik 1 (Bar)
-            'chartLabels' => $chartLabels,
-            'chartValues' => $chartValues,
-
-            // Grafik 2 (Line - Baru)
             'lineChartLabels' => $lineChartLabels,
             'lineChartValues' => $lineChartValues,
+            
+            // Tabel
+            'recentTransactions' => $recentTransactions,
         ];
     }
+
     #[Computed]
     public function pendingAlerts()
     {
         return [
-            'supply_chain' => \App\Models\SupplyChain::where('status', 'PENDING')->count(),
-            // Kita hitung pengajuan bantuan yang berstatus 'diajukan'
             'bantuan_mahasiswa' => \App\Models\PengajuanBantuan::where('status', 'diajukan')->count(), 
-            'withdrawals' => 0, 
-            'users' => 0
+            // Opsional: Cek jika ada tabel withdrawal
+            'withdrawals' => \App\Models\Withdrawal::where('status', 'pending')->count(), 
+            'users' => \App\Models\User::where('role', 'merchant')->whereNull('email_verified_at')->count()
         ];
     }
 }; ?>
@@ -142,133 +122,105 @@ class extends Component {
 <div class="p-6">
     <div class="flex justify-between items-center mb-8">
         <div>
-            <h1 class="text-2xl font-bold text-gray-800">Dashboard Utama</h1>
-            <p class="text-gray-500 text-sm mt-1">Overview performa keuangan dan operasional hari ini.</p>
-        </div>
-        <div class="flex items-center gap-4">
-            <div class="relative">
-                <input type="text" placeholder="Cari data..." class="pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-64">
-                <svg class="w-4 h-4 text-gray-400 absolute left-3 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-            </div>
-            <button class="p-2 bg-white border border-gray-200 rounded-full hover:bg-gray-50 relative">
-                <span class="absolute top-2 right-2.5 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
-                <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
-            </button>
+            <h1 class="text-2xl font-bold text-gray-800">Dashboard Command Center</h1>
+            <p class="text-gray-500 text-sm mt-1">Ringkasan arus kas digital dan operasional ekosistem SCFS.</p>
         </div>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         
-        <div class="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-6 text-white shadow-lg shadow-blue-200 relative overflow-hidden group">
-            <div class="absolute top-0 right-0 w-32 h-32 bg-white opacity-5 rounded-full -mr-10 -mt-10 transition-transform group-hover:scale-110"></div>
+        <div class="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-2xl p-6 text-white shadow-lg shadow-blue-200 relative overflow-hidden group">
+            <div class="absolute top-0 right-0 w-32 h-32 bg-white opacity-10 rounded-full -mr-10 -mt-10 transition-transform group-hover:scale-110"></div>
             <div class="relative z-10">
-                <p class="text-blue-100 text-sm font-medium mb-1">Total Modal Kerja</p>
+                <p class="text-blue-100 text-sm font-medium mb-1">Dompet Investasi (Modal)</p>
                 <h3 class="text-3xl font-bold">
-                    Rp {{ number_format($modalKerja, 0, ',', '.') }}
+                    Rp {{ number_format($saldoInvestasi, 0, ',', '.') }}
                 </h3>
-                <div class="mt-4 flex items-center gap-2 text-xs bg-blue-500/30 w-fit px-2 py-1 rounded-lg backdrop-blur-sm">
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
-                    <span>Wallet Utama: Active</span>
+                <div class="mt-4 flex items-center gap-2 text-xs bg-blue-800/50 w-fit px-2 py-1 rounded-lg backdrop-blur-sm">
+                    <svg class="w-3 h-3 text-blue-300" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a8 8 0 100 16 8 8 0 000-16zM9 11H7v-2h2V7h2v2h2v2h-2v2H9v-2z"></path></svg>
+                    <span>Dana Siap Suntik</span>
                 </div>
             </div>
         </div>
 
-        <div class="bg-orange-50 rounded-2xl p-6 border border-orange-100 shadow-sm relative overflow-hidden">
-            <div class="absolute top-4 right-4 p-2 bg-orange-100 rounded-lg text-orange-600">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-            </div>
-            <p class="text-gray-500 text-sm font-medium mb-1">Saldo Donasi</p>
-            <h3 class="text-2xl font-bold text-gray-800">
-                Rp {{ number_format($saldoDonasi, 0, ',', '.') }}
-            </h3>
-            <div class="mt-4 flex items-center gap-1 text-xs text-green-600 font-medium">
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
-                <span>Siap disalurkan</span>
+        <div class="bg-gradient-to-br from-amber-500 to-orange-600 rounded-2xl p-6 text-white shadow-lg shadow-orange-200 relative overflow-hidden group">
+            <div class="absolute top-0 right-0 w-32 h-32 bg-white opacity-10 rounded-full -mr-10 -mt-10 transition-transform group-hover:scale-110"></div>
+            <div class="relative z-10">
+                <p class="text-orange-100 text-sm font-medium mb-1">Dompet Donasi (Beasiswa)</p>
+                <h3 class="text-3xl font-bold">
+                    Rp {{ number_format($saldoDonasi, 0, ',', '.') }}
+                </h3>
+                <div class="mt-4 flex items-center gap-2 text-xs bg-orange-800/30 w-fit px-2 py-1 rounded-lg backdrop-blur-sm">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <span>Menunggu Disalurkan</span>
+                </div>
             </div>
         </div>
 
-        <div class="bg-red-50 rounded-2xl p-6 border border-red-100 shadow-sm relative overflow-hidden">
-            <div class="absolute top-4 right-4 p-2 bg-red-100 rounded-lg text-red-600">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-            </div>
-            <p class="text-gray-500 text-sm font-medium mb-1">Tagihan Merchant</p>
-            <h3 class="text-2xl font-bold text-red-600">
-                Rp {{ number_format($tagihanMerchant, 0, ',', '.') }}
-            </h3>
-            <div class="mt-4 flex items-center gap-1 text-xs text-red-500 font-medium">
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-                <span>Belum Lunas</span>
+        <div class="bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl p-6 text-white shadow-lg shadow-green-200 relative overflow-hidden group">
+            <div class="absolute top-0 right-0 w-32 h-32 bg-white opacity-10 rounded-full -mr-10 -mt-10 transition-transform group-hover:scale-110"></div>
+            <div class="relative z-10">
+                <p class="text-green-100 text-sm font-medium mb-1">Dompet Operasional (Laba)</p>
+                <h3 class="text-3xl font-bold">
+                    Rp {{ number_format($saldoOperasional, 0, ',', '.') }}
+                </h3>
+                <div class="mt-4 flex items-center gap-2 text-xs bg-green-800/30 w-fit px-2 py-1 rounded-lg backdrop-blur-sm">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
+                    <span>Dari Potongan Admin</span>
+                </div>
             </div>
         </div>
 
         <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm relative overflow-hidden">
-             <div class="absolute top-4 right-4 p-2 bg-green-100 rounded-lg text-green-600">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+             <div class="absolute top-4 right-4 p-2 bg-purple-100 rounded-lg text-purple-600">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
             </div>
-            <p class="text-gray-500 text-sm font-medium mb-1">Estimasi Profit</p>
-            <h3 class="text-2xl font-bold text-green-600">
-                + Rp {{ number_format($profit, 0, ',', '.') }}
+            <p class="text-gray-500 text-sm font-medium mb-1">Perputaran Bulan Ini</p>
+            <h3 class="text-2xl font-bold text-gray-800">
+                Rp {{ number_format($trxBulanIni, 0, ',', '.') }}
             </h3>
-            <div class="mt-4 flex items-center gap-1 text-xs text-green-600 font-medium">
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
-                <span>Bulan ini</span>
+            <div class="mt-4 flex items-center gap-1 text-xs text-purple-600 font-medium">
+                <span>Total ekosistem (Sukses)</span>
             </div>
         </div>
     </div>
-    {{-- Fungsi baru --}}
-    <div class="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+
+    <div class="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
     
-    @if($this->pendingAlerts['bantuan_mahasiswa'] > 0)
-    <div class="bg-purple-50 border-l-4 border-purple-500 p-4 rounded-r-lg shadow-sm flex items-start justify-between">
-        <div class="flex items-center">
-            <svg class="w-6 h-6 text-purple-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            <div>
-                <h3 class="text-sm font-bold text-purple-800">Persetujuan Bantuan Mahasiswa</h3>
-                <p class="text-xs text-purple-700 mt-1">Ada <strong>{{ $this->pendingAlerts['bantuan_mahasiswa'] }}</strong> pengajuan dana menunggu disetujui.</p>
+        @if($this->pendingAlerts['bantuan_mahasiswa'] > 0)
+        <div class="bg-orange-50 border-l-4 border-orange-500 p-4 rounded-r-lg shadow-sm flex items-start justify-between">
+            <div class="flex items-center">
+                <svg class="w-6 h-6 text-orange-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                <div>
+                    <h3 class="text-sm font-bold text-orange-800">Pengajuan Beasiswa</h3>
+                    <p class="text-xs text-orange-700 mt-1">Ada <strong>{{ $this->pendingAlerts['bantuan_mahasiswa'] }}</strong> pengajuan dana menunggu disetujui.</p>
+                </div>
             </div>
+            <a href="{{ route('approval.mahasiswa') }}" wire:navigate class="text-xs font-bold text-orange-600 hover:text-orange-800 underline">Setujui</a>
         </div>
-        <a href="{{ route('approval.mahasiswa') }}" wire:navigate class="text-xs font-bold text-purple-600 hover:text-purple-800 underline">Review & Setujui</a>
-    </div>
-    @endif
+        @endif
 
-    @if($this->pendingAlerts['withdrawals'] > 0)
-    <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg shadow-sm flex items-start justify-between">
-        <div class="flex items-center">
-            <svg class="w-6 h-6 text-blue-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-            <div>
-                <h3 class="text-sm font-bold text-blue-800">Permintaan Pencairan Dana</h3>
-                <p class="text-xs text-blue-700 mt-1">Ada <strong>{{ $this->pendingAlerts['withdrawals'] }}</strong> antrean penarikan.</p>
+        @if($this->pendingAlerts['withdrawals'] > 0)
+        <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg shadow-sm flex items-start justify-between">
+            <div class="flex items-center">
+                <svg class="w-6 h-6 text-blue-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                <div>
+                    <h3 class="text-sm font-bold text-blue-800">Permintaan Pencairan (Withdraw)</h3>
+                    <p class="text-xs text-blue-700 mt-1">Ada <strong>{{ $this->pendingAlerts['withdrawals'] }}</strong> antrean penarikan dana ke Bank.</p>
+                </div>
             </div>
+            <a href="#" class="text-xs font-bold text-blue-600 hover:text-blue-800 underline">Proses</a>
         </div>
-        <a href="#" class="text-xs font-bold text-blue-600 hover:text-blue-800 underline">Proses</a>
+        @endif
     </div>
-    @endif
 
-    @if($this->pendingAlerts['users'] > 0)
-    <div class="bg-purple-50 border-l-4 border-purple-500 p-4 rounded-r-lg shadow-sm flex items-start justify-between">
-        <div class="flex items-center">
-            <svg class="w-6 h-6 text-purple-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
-            <div>
-                <h3 class="text-sm font-bold text-purple-800">Verifikasi Akun Baru</h3>
-                <p class="text-xs text-purple-700 mt-1">Ada <strong>{{ $this->pendingAlerts['users'] }}</strong> pendaftar baru.</p>
-            </div>
-        </div>
-        <a href="#" class="text-xs font-bold text-purple-600 hover:text-purple-800 underline">Verifikasi</a>
-    </div>
-    @endif
-
-</div>
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        
         <div class="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm" wire:ignore>
             <div class="flex justify-between items-start mb-6">
                 <div>
-                    <h3 class="font-bold text-gray-800 text-lg">Grafik Penyerapan Donasi</h3>
-                    <p class="text-xs text-gray-400">Total penyaluran dana per bulan</p>
+                    <h3 class="font-bold text-gray-800 text-lg">Grafik Perputaran Ekosistem</h3>
+                    <p class="text-xs text-gray-400">Total volume uang berputar per bulan</p>
                 </div>
-                <select class="text-xs border-gray-200 rounded-lg text-gray-500 bg-gray-50">
-                    <option>6 Bulan Terakhir</option>
-                </select>
             </div>
             <div class="relative h-64 w-full">
                  <canvas id="cashflowChart"></canvas>
@@ -278,12 +230,8 @@ class extends Component {
         <div class="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm" wire:ignore>
             <div class="flex justify-between items-start mb-6">
                 <div>
-                    <h3 class="font-bold text-gray-800 text-lg">Volume Transaksi Harian</h3>
-                    <p class="text-xs text-gray-400">Jumlah transaksi tercatat</p>
-                </div>
-                <div class="flex items-center gap-2">
-                    <span class="w-2 h-2 rounded-full bg-blue-500"></span>
-                    <span class="text-xs text-gray-500">Hari Ini</span>
+                    <h3 class="font-bold text-gray-800 text-lg">Frekuensi Transaksi Harian</h3>
+                    <p class="text-xs text-gray-400">Jumlah aktivitas di aplikasi</p>
                 </div>
             </div>
             <div class="relative h-64 w-full">
@@ -294,16 +242,15 @@ class extends Component {
 
     <div class="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm mb-8">
          <div class="flex justify-between items-center mb-6">
-            <h3 class="font-bold text-gray-800 text-lg">Transaksi Terbaru</h3>
-            <button class="text-sm text-blue-600 font-semibold hover:text-blue-700">Lihat Semua</button>
+            <h3 class="font-bold text-gray-800 text-lg">Catatan Transaksi Terbaru</h3>
         </div>
         
         <div class="overflow-x-auto">
             <table class="w-full text-left border-collapse">
                 <thead>
                     <tr class="text-xs text-gray-400 border-b border-gray-100 uppercase tracking-wider">
-                        <th class="py-3 px-4 font-semibold">ID Transaksi</th>
-                        <th class="py-3 px-4 font-semibold">Merchant / User</th>
+                        <th class="py-3 px-4 font-semibold">Tipe Transaksi</th>
+                        <th class="py-3 px-4 font-semibold">User Pelaku</th>
                         <th class="py-3 px-4 font-semibold">Tanggal</th>
                         <th class="py-3 px-4 font-semibold">Nominal</th>
                         <th class="py-3 px-4 font-semibold">Status</th>
@@ -312,14 +259,13 @@ class extends Component {
                 <tbody class="text-sm text-gray-600 divide-y divide-gray-50">
                     @forelse($recentTransactions as $trx)
                     <tr class="hover:bg-gray-50 transition group">
-                        <td class="py-4 px-4 font-bold text-gray-700 group-hover:text-blue-600 transition">
-                            {{ $trx->order_id ?? '#TRX-'.$trx->id }}
+                        <td class="py-4 px-4 font-bold text-gray-700 uppercase text-xs">
+                            {{ $trx->type }}
                         </td>
                         <td class="py-4 px-4">
-                            <div class="font-medium text-gray-800">{{ $trx->user->name ?? 'Guest' }}</div>
-                            <div class="text-xs text-gray-400 capitalize">{{ $trx->user->role ?? 'User' }}</div>
+                            <div class="font-medium text-gray-800">{{ optional($trx->user)->name ?? 'Sistem / Guest' }}</div>
                         </td>
-                        <td class="py-4 px-4 text-gray-500">{{ $trx->created_at->format('d M Y') }}</td>
+                        <td class="py-4 px-4 text-gray-500">{{ $trx->created_at->format('d M Y - H:i') }}</td>
                         <td class="py-4 px-4 font-bold text-gray-800">Rp {{ number_format($trx->total_amount, 0, ',', '.') }}</td>
                         <td class="py-4 px-4">
                             @php
@@ -336,19 +282,18 @@ class extends Component {
                         </td>
                     </tr>
                     @empty
-                    <tr><td colspan="5" class="text-center py-8 text-gray-400">Belum ada transaksi data.</td></tr>
+                    <tr><td colspan="5" class="text-center py-8 text-gray-400">Belum ada transaksi di sistem.</td></tr>
                     @endforelse
                 </tbody>
             </table>
         </div>
     </div>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-    // Gunakan livewire:navigated agar script berjalan lancar saat perpindahan halaman SPA
     document.addEventListener('livewire:navigated', () => {
-        
-        // --- 1. CONFIG BAR CHART (Cashflow/Donasi) ---
+        // --- 1. CONFIG BAR CHART ---
         const ctxBar = document.getElementById('cashflowChart');
         if (ctxBar) {
             new Chart(ctxBar, {
@@ -356,12 +301,11 @@ class extends Component {
                 data: {
                     labels: @json($chartLabels),
                     datasets: [{
-                        label: 'Penyaluran',
+                        label: 'Volume Berputar (Rp)',
                         data: @json($chartValues),
-                        backgroundColor: '#3B82F6',
+                        backgroundColor: '#6366F1', // Indigo color
                         borderRadius: 4,
                         barThickness: 25,
-                        hoverBackgroundColor: '#2563EB'
                     }]
                 },
                 options: {
@@ -369,43 +313,32 @@ class extends Component {
                     maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
                     scales: {
-                        y: { 
-                            beginAtZero: true, 
-                            grid: { borderDash: [4, 4], drawBorder: false, color: '#F3F4F6' },
-                            ticks: { font: { size: 10 } }
-                        },
-                        x: { 
-                            grid: { display: false },
-                            ticks: { font: { size: 10 } }
-                        }
+                        y: { beginAtZero: true, grid: { borderDash: [4, 4] } },
+                        x: { grid: { display: false } }
                     }
                 }
             });
         }
 
-        // --- 2. CONFIG LINE CHART (Volume Transaksi) ---
+        // --- 2. CONFIG LINE CHART ---
         const ctxLine = document.getElementById('volumeChart');
         if (ctxLine) {
             const gradient = ctxLine.getContext('2d').createLinearGradient(0, 0, 0, 300);
-            gradient.addColorStop(0, 'rgba(59, 130, 246, 0.2)');
-            gradient.addColorStop(1, 'rgba(59, 130, 246, 0)');
+            gradient.addColorStop(0, 'rgba(16, 185, 129, 0.2)'); // Emerald color
+            gradient.addColorStop(1, 'rgba(16, 185, 129, 0)');
 
             new Chart(ctxLine, {
                 type: 'line',
                 data: {
                     labels: @json($lineChartLabels),
                     datasets: [{
-                        label: 'Transaksi',
+                        label: 'Jumlah Transaksi',
                         data: @json($lineChartValues),
-                        borderColor: '#3B82F6',
+                        borderColor: '#10B981',
                         backgroundColor: gradient,
                         borderWidth: 3,
                         tension: 0.4,
                         fill: true,
-                        pointRadius: 4,
-                        pointBackgroundColor: '#fff',
-                        pointBorderColor: '#3B82F6',
-                        pointBorderWidth: 2
                     }]
                 },
                 options: {
@@ -414,10 +347,7 @@ class extends Component {
                     plugins: { legend: { display: false } },
                     scales: {
                         y: { display: false, beginAtZero: true },
-                        x: { 
-                            grid: { display: false },
-                            ticks: { color: '#9CA3AF', font: { size: 10 } }
-                        }
+                        x: { grid: { display: false } }
                     }
                 }
             });

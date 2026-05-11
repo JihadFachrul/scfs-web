@@ -7,26 +7,22 @@ use App\Models\PengajuanBantuan;
 use App\Models\MahasiswaProfile;
 use App\Models\Wallet;
 use App\Models\Transaction;
+use App\Models\LedgerEntry; // <-- WAJIB DITAMBAHKAN
 use Illuminate\Support\Facades\DB;
 
 new #[Layout('layouts.lkbb')] class extends Component {
     
-    // Properti Modal Detail
     public $showDetailModal = false;
     public $selectedPengajuan = null;
 
-    // Properti Modal Reject
     public $showRejectModal = false;
     public $selectedId = null;
 
-    // Properti Modal Approve
     public $showApproveModal = false;
 
-    // Properti Modal Profil
     public $showProfileModal = false;
     public $selectedProfile = null;
 
-    // Default status
     public $statusFilter = 'diajukan'; 
 
     #[Computed]
@@ -38,10 +34,7 @@ new #[Layout('layouts.lkbb')] class extends Component {
             ->get();
     }
 
-    public function setFilter($status)
-    {
-        $this->statusFilter = $status;
-    }
+    public function setFilter($status) { $this->statusFilter = $status; }
 
     public function lihatDetail($id)
     {
@@ -49,11 +42,7 @@ new #[Layout('layouts.lkbb')] class extends Component {
         $this->showDetailModal = true;
     }
 
-    public function tutupDetail()
-    {
-        $this->showDetailModal = false;
-        $this->selectedPengajuan = null;
-    }
+    public function tutupDetail() { $this->showDetailModal = false; $this->selectedPengajuan = null; }
 
     public function lihatProfil($id)
     {
@@ -61,11 +50,7 @@ new #[Layout('layouts.lkbb')] class extends Component {
         $this->showProfileModal = true;
     }
 
-    public function tutupProfil()
-    {
-        $this->showProfileModal = false;
-        $this->selectedProfile = null;
-    }
+    public function tutupProfil() { $this->showProfileModal = false; $this->selectedProfile = null; }
 
     public function openApproveModal($id)
     {
@@ -74,47 +59,57 @@ new #[Layout('layouts.lkbb')] class extends Component {
         $this->showDetailModal = false; 
     }
 
-    // FUNGSI APPROVE (SUDAH DI-REFACTOR DENGAN CLEAN ARCHITECTURE)
+    // =====================================
+    // FUNGSI APPROVE (REVISI DOMPET BARU)
+    // =====================================
     public function confirmApprove()
     {
         try {
             DB::transaction(function () {
-                // 1. Pessimistic Locking untuk mencegah Double Approve
+                // 1. Kunci data pengajuan (Pessimistic Locking)
                 $pengajuan = PengajuanBantuan::with('mahasiswaProfile.user')
                     ->where('id', $this->selectedId)
                     ->where('status', 'diajukan')
                     ->lockForUpdate()
                     ->firstOrFail();
 
-                // 2. Kunci dan Cek Dompet Donasi LKBB (Mencegah saldo minus)
-                // Asumsi Anda menggunakan tabel Wallet untuk menampung total dana dari Donatur
-                $donationWallet = Wallet::where('type', 'DONATION_POOL')->lockForUpdate()->first();
+                // 2. Kunci Brankas Donasi LKBB (Nama Tipe Dompet Diperbarui)
+                $donationWallet = Wallet::where('type', 'LKBB_DONATION')->lockForUpdate()->first();
                 
                 if (!$donationWallet || $donationWallet->balance < $pengajuan->nominal) {
-                    throw new \Exception('Saldo Dompet Donasi LKBB tidak mencukupi untuk pencairan ini.');
+                    throw new \Exception('Saldo Brankas Donasi LKBB tidak mencukupi untuk pencairan ini!');
                 }
 
-                // 3. Potong Saldo LKBB & Tambah Saldo Mahasiswa (Single Source of Truth)
+                // 3. Potong Saldo LKBB & Tambah Saldo Mahasiswa
                 $donationWallet->decrement('balance', $pengajuan->nominal);
                 $pengajuan->mahasiswaProfile->increment('saldo', $pengajuan->nominal);
 
-                // 4. Ubah status pengajuan & profil jadi disetujui
+                // 4. Update status persetujuan
                 $pengajuan->update([
                     'status' => 'disetujui',
                     'updated_at' => now(),
                 ]);
                 $pengajuan->mahasiswaProfile->update(['status_bantuan' => 'disetujui']);
 
-                // 5. Catat histori di tabel Transactions (Sesuai skema terbaru)
-                Transaction::create([
-                    'order_id'     => $pengajuan->nomor_pengajuan,
-                    'user_id'      => $pengajuan->mahasiswaProfile->user_id, // Yang menerima
-                    'merchant_id'  => null, // Null karena ini bukan bayar ke kantin
-                    'type'         => 'penerimaan_bantuan',
-                    'status'       => 'sukses',
-                    'total_amount' => $pengajuan->nominal,
-                    'fee_lkbb'     => 0, // Tidak ada potongan untuk bantuan
-                    'description'  => 'Pencairan Dana Subsidi/Bantuan dari LKBB',
+                // 5. Catat Transaksi
+                $transaction = Transaction::create([
+                    'order_id'         => $pengajuan->nomor_pengajuan,
+                    'user_id'          => $pengajuan->mahasiswaProfile->user_id, // ID Mahasiswa Penerima
+                    'sender_wallet_id' => $donationWallet->id, // ID Dompet LKBB Pengirim
+                    'type'             => 'penerimaan_bantuan',
+                    'status'           => 'sukses',
+                    'total_amount'     => $pengajuan->nominal,
+                    'fee_lkbb'         => 0,
+                    'description'      => 'Pencairan Dana Subsidi/Bantuan dari LKBB',
+                ]);
+
+                // 6. Catat Mutasi Uang Keluar (DEBIT) di Buku Besar LKBB
+                LedgerEntry::create([
+                    'transaction_id' => $transaction->id,
+                    'wallet_id'      => $donationWallet->id,
+                    'entry_type'     => 'DEBIT', // Karena uang keluar dari brankas LKBB
+                    'amount'         => $pengajuan->nominal,
+                    'balance_after'  => $donationWallet->balance, // Sisa saldo terkini
                 ]);
             });
 
@@ -122,7 +117,7 @@ new #[Layout('layouts.lkbb')] class extends Component {
             $this->showApproveModal = false;
 
         } catch (\Exception $e) {
-            session()->flash('error', $e->getMessage()); // Menampilkan pesan error spesifik (misal: saldo kurang)
+            session()->flash('error', $e->getMessage()); 
             $this->showApproveModal = false;
         }
     }
@@ -134,7 +129,6 @@ new #[Layout('layouts.lkbb')] class extends Component {
         $this->showDetailModal = false; 
     }
 
-    // FUNGSI REJECT
     public function confirmReject()
     {
         try {
@@ -167,7 +161,7 @@ new #[Layout('layouts.lkbb')] class extends Component {
     <div class="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
             <h2 class="text-2xl font-bold text-gray-900">Verifikasi Bantuan Mahasiswa</h2>
-            <p class="text-gray-500 text-sm mt-1">Daftar mahasiswa yang diajukan oleh Admin untuk menerima pencairan dana.</p>
+            <p class="text-gray-500 text-sm mt-1">Daftar mahasiswa yang diajukan oleh Admin LAPI untuk menerima pencairan dana.</p>
         </div>
     </div>
 
@@ -186,7 +180,7 @@ new #[Layout('layouts.lkbb')] class extends Component {
 
     <div class="bg-white p-2 rounded-2xl border border-gray-200 shadow-sm inline-flex gap-1 overflow-x-auto max-w-full">
         <button wire:click="setFilter('diajukan')" class="px-5 py-2.5 rounded-xl text-sm font-bold transition-colors whitespace-nowrap {{ $statusFilter == 'diajukan' ? 'bg-yellow-50 text-yellow-600 shadow-sm border border-yellow-100' : 'text-gray-500 hover:bg-gray-50' }}">
-            ⏳ Menunggu LKBB
+            ⏳ Menunggu Persetujuan
         </button>
         <button wire:click="setFilter('disetujui')" class="px-5 py-2.5 rounded-xl text-sm font-bold transition-colors whitespace-nowrap {{ $statusFilter == 'disetujui' ? 'bg-green-50 text-green-600 shadow-sm border border-green-100' : 'text-gray-500 hover:bg-gray-50' }}">
             ✅ Telah Cair
@@ -201,7 +195,7 @@ new #[Layout('layouts.lkbb')] class extends Component {
             <h3 class="font-bold text-gray-900 text-sm">
                 @if($statusFilter == 'diajukan') Antrean Pencairan @elseif($statusFilter == 'disetujui') Riwayat Pencairan Sukses @else Riwayat Ditolak @endif
             </h3>
-            <span class="text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100">Total: {{ $this->filteredRequests->count() }} Data</span>
+            <span class="text-xs font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full border border-indigo-100">Total: {{ $this->filteredRequests->count() }} Data</span>
         </div>
 
         <div class="overflow-x-auto">
@@ -225,7 +219,7 @@ new #[Layout('layouts.lkbb')] class extends Component {
 
                         <td class="px-6 py-4">
                             <div class="flex items-center gap-3">
-                                <div class="h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold bg-blue-100 text-blue-700 flex-shrink-0">
+                                <div class="h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold bg-indigo-100 text-[#4338CA] flex-shrink-0">
                                     {{ strtoupper(substr($req->mahasiswaProfile->user->name ?? 'M', 0, 2)) }}
                                 </div>
                                 <div>
@@ -236,7 +230,7 @@ new #[Layout('layouts.lkbb')] class extends Component {
                         </td>
 
                         <td class="px-6 py-4 text-right">
-                            <div class="text-sm font-bold {{ $statusFilter == 'ditolak' ? 'text-gray-400 line-through' : 'text-blue-600' }}">
+                            <div class="text-sm font-bold {{ $statusFilter == 'ditolak' ? 'text-gray-400 line-through' : 'text-indigo-600' }}">
                                 Rp {{ number_format($req->nominal ?? 0, 0, ',', '.') }}
                             </div>
                         </td>
@@ -248,11 +242,11 @@ new #[Layout('layouts.lkbb')] class extends Component {
                                 </button>
 
                                 @if($statusFilter == 'diajukan')
-                                <button wire:click="lihatDetail({{ $req->id }})" class="px-3 py-1.5 text-[10px] font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition shadow-sm uppercase tracking-wider">
+                                <button wire:click="lihatDetail({{ $req->id }})" class="px-3 py-1.5 text-[10px] font-bold text-white bg-[#4338CA] rounded-lg hover:bg-indigo-800 transition shadow-sm uppercase tracking-wider">
                                     Review & Cairkan
                                 </button>
                                 @else
-                                <button wire:click="lihatDetail({{ $req->id }})" class="px-3 py-1.5 text-[10px] font-bold text-blue-600 bg-blue-50 border border-blue-100 rounded-lg hover:bg-blue-100 transition uppercase tracking-wider">
+                                <button wire:click="lihatDetail({{ $req->id }})" class="px-3 py-1.5 text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-lg hover:bg-indigo-100 transition uppercase tracking-wider">
                                     Detail Data
                                 </button>
                                 @endif
@@ -305,9 +299,9 @@ new #[Layout('layouts.lkbb')] class extends Component {
                         <span class="font-bold text-gray-900 text-sm">{{ $selectedPengajuan->mahasiswaProfile->ipk ?? 'Belum diinput' }}</span>
                     </div>
                     
-                    <div class="col-span-2 bg-blue-50 border border-blue-100 p-5 rounded-xl flex justify-between items-center mt-2">
-                        <span class="block text-xs text-blue-600 font-bold uppercase tracking-wider">Nominal Pencairan</span>
-                        <span class="font-extrabold text-blue-700 text-2xl">Rp {{ number_format($selectedPengajuan->nominal ?? 0, 0, ',', '.') }}</span>
+                    <div class="col-span-2 bg-indigo-50 border border-indigo-100 p-5 rounded-xl flex justify-between items-center mt-2">
+                        <span class="block text-xs text-indigo-600 font-bold uppercase tracking-wider">Nominal Pencairan</span>
+                        <span class="font-extrabold text-indigo-700 text-2xl">Rp {{ number_format($selectedPengajuan->nominal ?? 0, 0, ',', '.') }}</span>
                     </div>
                 </div>
             </div>
@@ -317,7 +311,7 @@ new #[Layout('layouts.lkbb')] class extends Component {
                     <button wire:click="openRejectModal({{ $selectedPengajuan->id }})" class="px-5 py-2.5 text-sm font-bold text-red-600 bg-red-50 border border-red-100 rounded-xl hover:bg-red-100 transition-colors">
                         Tolak Pengajuan
                     </button>
-                    <button wire:click="openApproveModal({{ $selectedPengajuan->id }})" class="px-5 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors shadow-sm">
+                    <button wire:click="openApproveModal({{ $selectedPengajuan->id }})" class="px-5 py-2.5 text-sm font-bold text-white bg-[#4338CA] rounded-xl hover:bg-indigo-800 transition-colors shadow-sm">
                         Setujui & Cairkan
                     </button>
                 @else
@@ -335,15 +329,15 @@ new #[Layout('layouts.lkbb')] class extends Component {
     <div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm transition-opacity">
         <div class="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden text-center">
             <div class="p-6">
-                <div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-blue-100 mb-4">
-                    <svg class="h-8 w-8 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                <div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-indigo-100 mb-4">
+                    <svg class="h-8 w-8 text-[#4338CA]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
                 </div>
                 <h3 class="text-lg font-bold text-gray-900 mb-2">Setujui Pencairan Dana?</h3>
-                <p class="text-sm text-gray-500">Saldo donasi LKBB akan langsung dipotong dan dikirim ke Dompet Mahasiswa terkait.</p>
+                <p class="text-sm text-gray-500">Saldo brankas donasi LKBB akan dipotong dan ditransfer ke Dompet Mahasiswa terkait secara permanen.</p>
             </div>
             <div class="px-6 py-4 flex gap-3 bg-gray-50/50 border-t border-gray-100">
                 <button wire:click="$set('showApproveModal', false)" class="w-full px-4 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition">Batal</button>
-                <button wire:click="confirmApprove" class="w-full px-4 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition shadow-sm">Ya, Cairkan</button>
+                <button wire:click="confirmApprove" class="w-full px-4 py-2.5 text-sm font-bold text-white bg-[#4338CA] rounded-xl hover:bg-indigo-800 transition shadow-sm">Ya, Cairkan</button>
             </div>
         </div>
     </div>
@@ -373,7 +367,7 @@ new #[Layout('layouts.lkbb')] class extends Component {
             
             <div class="bg-white px-6 py-4 border-b border-gray-100 flex justify-between items-center sticky top-0 z-10">
                 <h3 class="font-bold text-gray-900 text-sm flex items-center gap-2">
-                    <svg class="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                    <svg class="w-5 h-5 text-[#4338CA]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
                     Profil Mahasiswa Lengkap
                 </h3>
                 <button wire:click="tutupProfil" class="text-gray-400 hover:text-gray-600 transition-colors p-1.5 rounded-lg hover:bg-gray-200">
@@ -385,7 +379,7 @@ new #[Layout('layouts.lkbb')] class extends Component {
                 
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 flex flex-col md:flex-row justify-between items-center gap-4">
                     <div class="flex items-center gap-4">
-                        <div class="h-16 w-16 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center text-2xl font-bold border border-blue-200">
+                        <div class="h-16 w-16 rounded-2xl bg-indigo-100 text-[#4338CA] flex items-center justify-center text-2xl font-bold border border-indigo-200">
                             {{ strtoupper(substr($selectedProfile->user->name ?? 'M', 0, 2)) }}
                         </div>
                         <div>
@@ -395,7 +389,7 @@ new #[Layout('layouts.lkbb')] class extends Component {
                             </div>
                             <p class="text-sm text-gray-500 font-medium">NIM: {{ $selectedProfile->nim ?? '-' }} • {{ $selectedProfile->jurusan ?? '-' }}</p>
                             <p class="text-xs text-gray-400 mt-1 flex items-center gap-1">
-                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2-2v12a2 2 0 002 2z" /></svg>
                                 Bergabung sejak {{ $selectedProfile->created_at ? $selectedProfile->created_at->format('d M Y') : '-' }}
                             </p>
                         </div>
@@ -404,52 +398,27 @@ new #[Layout('layouts.lkbb')] class extends Component {
 
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2 mb-4">
-                            Informasi Pribadi
-                        </h3>
+                        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2 mb-4">Informasi Pribadi</h3>
                         <div class="space-y-4">
-                            <div>
-                                <span class="block text-[10px] text-gray-400 font-bold mb-0.5 uppercase">Email</span>
-                                <span class="text-gray-900 text-sm font-medium">{{ $selectedProfile->user->email ?? '-' }}</span>
-                            </div>
-                            <div>
-                                <span class="block text-[10px] text-gray-400 font-bold mb-0.5 uppercase">No HP</span>
-                                <span class="text-gray-900 text-sm font-medium">{{ $selectedProfile->no_hp ?? '-' }}</span>
-                            </div>
-                            <div>
-                                <span class="block text-[10px] text-gray-400 font-bold mb-0.5 uppercase">Alamat</span>
-                                <span class="text-gray-900 text-sm font-medium">{{ $selectedProfile->alamat ?? '-' }}</span>
-                            </div>
+                            <div><span class="block text-[10px] text-gray-400 font-bold mb-0.5 uppercase">Email</span><span class="text-gray-900 text-sm font-medium">{{ $selectedProfile->user->email ?? '-' }}</span></div>
+                            <div><span class="block text-[10px] text-gray-400 font-bold mb-0.5 uppercase">No HP</span><span class="text-gray-900 text-sm font-medium">{{ $selectedProfile->no_hp ?? '-' }}</span></div>
+                            <div><span class="block text-[10px] text-gray-400 font-bold mb-0.5 uppercase">Alamat</span><span class="text-gray-900 text-sm font-medium">{{ $selectedProfile->alamat ?? '-' }}</span></div>
                         </div>
                     </div>
 
                     <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2 mb-4">
-                            Data Akademik
-                        </h3>
+                        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2 mb-4">Data Akademik</h3>
                         <div class="space-y-4">
-                            <div>
-                                <span class="block text-[10px] text-gray-400 font-bold mb-0.5 uppercase">Universitas</span>
-                                <span class="text-gray-900 text-sm font-medium">Institut Teknologi Bandung</span>
-                            </div>
-                            <div>
-                                <span class="block text-[10px] text-gray-400 font-bold mb-0.5 uppercase">Program Studi</span>
-                                <span class="text-gray-900 text-sm font-medium">{{ $selectedProfile->jurusan ?? '-' }}</span>
-                            </div>
+                            <div><span class="block text-[10px] text-gray-400 font-bold mb-0.5 uppercase">Universitas</span><span class="text-gray-900 text-sm font-medium">Institut Teknologi Bandung</span></div>
+                            <div><span class="block text-[10px] text-gray-400 font-bold mb-0.5 uppercase">Program Studi</span><span class="text-gray-900 text-sm font-medium">{{ $selectedProfile->jurusan ?? '-' }}</span></div>
                             <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <span class="block text-[10px] text-gray-400 font-bold mb-0.5 uppercase">Semester</span>
-                                    <span class="text-gray-900 text-sm font-medium">{{ $selectedProfile->semester ?? '-' }}</span>
-                                </div>
-                                <div>
-                                    <span class="block text-[10px] text-gray-400 font-bold mb-0.5 uppercase">IPK Terakhir</span>
-                                    <span class="text-gray-900 text-sm font-medium">{{ $selectedProfile->ipk ?? '-' }}</span>
-                                </div>
+                                <div><span class="block text-[10px] text-gray-400 font-bold mb-0.5 uppercase">Semester</span><span class="text-gray-900 text-sm font-medium">{{ $selectedProfile->semester ?? '-' }}</span></div>
+                                <div><span class="block text-[10px] text-gray-400 font-bold mb-0.5 uppercase">IPK Terakhir</span><span class="text-gray-900 text-sm font-medium">{{ $selectedProfile->ipk ?? '-' }}</span></div>
                             </div>
                         </div>
                     </div>
 
-                    <div class="bg-gradient-to-br from-blue-600 to-indigo-800 p-6 rounded-2xl shadow-lg text-white flex flex-col justify-between relative overflow-hidden group">
+                    <div class="bg-gradient-to-br from-[#4338CA] to-[#312E81] p-6 rounded-2xl shadow-lg text-white flex flex-col justify-between relative overflow-hidden group">
                         <div class="absolute top-0 right-0 w-32 h-32 bg-white opacity-5 rounded-full -mr-10 -mt-10 transition-transform group-hover:scale-110"></div>
                         
                         <div class="relative z-10 flex justify-between items-start mb-4">
@@ -462,13 +431,13 @@ new #[Layout('layouts.lkbb')] class extends Component {
                         </div>
 
                         <div class="relative z-10">
-                            <span class="block text-[10px] text-blue-200 font-bold tracking-wider mb-1 uppercase">Sisa Saldo Bantuan</span>
+                            <span class="block text-[10px] text-indigo-200 font-bold tracking-wider mb-1 uppercase">Sisa Saldo Bantuan</span>
                             <span class="text-3xl font-extrabold tracking-tight">Rp {{ number_format($selectedProfile->saldo ?? 0, 0, ',', '.') }}</span>
                         </div>
 
-                        <div class="relative z-10 flex justify-between items-end mt-6 pt-4 border-t border-blue-400/30">
+                        <div class="relative z-10 flex justify-between items-end mt-6 pt-4 border-t border-indigo-400/30">
                             <div>
-                                <span class="block text-[9px] text-blue-200 font-bold uppercase tracking-wider mb-0.5">Pemilik</span>
+                                <span class="block text-[9px] text-indigo-200 font-bold uppercase tracking-wider mb-0.5">Pemilik</span>
                                 <span class="font-bold text-xs uppercase">{{ $selectedProfile->user->name ?? '-' }}</span>
                             </div>
                             <div class="text-right">
