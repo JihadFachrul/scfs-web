@@ -15,8 +15,14 @@ new
 class extends Component {
     use WithFileUploads;
 
-    // State Profil & Rekening
-    public $nama_pemilik, $nama_kantin, $nik, $no_hp, $lokasi_blok, $info_pencairan;
+    // State Profil & Bisnis
+    public $nama_pemilik, $nama_kantin, $nik, $no_hp, $lokasi_blok;
+    
+    // State Rekening (Baru)
+    public $nama_bank = 'BCA';
+    public $bank_lainnya = '';
+    public $no_rekening = '';
+
     public $foto_ktp_baru, $foto_kantin_baru;
     public $existing_ktp, $existing_kantin;
     
@@ -37,7 +43,17 @@ class extends Component {
         $this->nik = $profile->nik;
         $this->no_hp = $profile->no_hp;
         $this->lokasi_blok = $profile->lokasi_blok;
-        $this->info_pencairan = $profile->info_pencairan;
+
+        // Logika untuk menampilkan Bank yang tersimpan
+        $standardBanks = ['BCA', 'BNI', 'BRI', 'Mandiri', 'BJB', 'GoPay', 'OVO'];
+        if (in_array($profile->nama_bank, $standardBanks)) {
+            $this->nama_bank = $profile->nama_bank;
+        } elseif (!empty($profile->nama_bank)) {
+            $this->nama_bank = 'Lainnya';
+            $this->bank_lainnya = $profile->nama_bank;
+        }
+
+        $this->no_rekening = $profile->no_rekening;
 
         $this->existing_ktp = $profile->foto_ktp;
         $this->existing_kantin = $profile->foto_kantin;
@@ -48,15 +64,22 @@ class extends Component {
         $this->validate([
             'nama_pemilik'   => 'required|string|max:255',
             'nama_kantin'    => 'required|string|max:255',
-            'nik'            => 'required|numeric|digits_between:15,17',
+            'nik' => 'required|digits:16',
             'no_hp'          => 'required|string|max:20|regex:/^[0-9\-\+]+$/',
             'lokasi_blok'    => 'required|string|max:255',
-            'info_pencairan' => 'required|string|max:255',
+            
+            // Validasi Rekening Baru
+            'nama_bank'      => 'required|string',
+            'bank_lainnya'   => 'required_if:nama_bank,Lainnya',
+            'no_rekening'    => 'required|numeric',
+
             'foto_ktp_baru'    => 'nullable|image|mimes:jpeg,png,jpg|max:2048',
             'foto_kantin_baru' => 'nullable|image|mimes:jpeg,png,jpg|max:2048',
             'password_konfirmasi'=> 'required|string', 
         ], [
-            'password_konfirmasi.required' => 'Password wajib diisi untuk keamanan perubahan rekening.'
+            'password_konfirmasi.required' => 'Password wajib diisi untuk keamanan perubahan rekening.',
+            'bank_lainnya.required_if' => 'Nama bank wajib diisi jika memilih opsi Lainnya.',
+            'no_rekening.numeric' => 'Nomor rekening hanya boleh berisi angka.'
         ]);
 
         $user = Auth::user();
@@ -68,13 +91,18 @@ class extends Component {
         }
 
         $profile = MerchantProfile::where('user_id', $user->id)->first();
+        
+        // Tentukan bank final yang akan disimpan ke database
+        $bankFinal = $this->nama_bank === 'Lainnya' ? $this->bank_lainnya : $this->nama_bank;
+
         $updateData = [
             'nama_pemilik'   => $this->nama_pemilik,
             'nama_kantin'    => $this->nama_kantin,
             'nik'            => $this->nik,
             'no_hp'          => $this->no_hp,
             'lokasi_blok'    => $this->lokasi_blok,
-            'info_pencairan' => $this->info_pencairan,
+            'nama_bank'      => $bankFinal,
+            'no_rekening'    => $this->no_rekening,
         ];
 
         if ($this->foto_ktp_baru) {
@@ -127,7 +155,6 @@ class extends Component {
     }
 }; ?>
 
-{{-- PERUBAHAN DI SINI: Menghapus max-w-5xl dan mx-auto --}}
 <div class="py-8 px-6 md:px-8 w-full space-y-8 relative">
     
     <div class="mb-6">
@@ -150,7 +177,7 @@ class extends Component {
             {{-- KOLOM KIRI: INFO UTAMA & REKENING --}}
             <div class="lg:col-span-2 space-y-6">
                 
-                {{-- Card 1: Info Finansial --}}
+                {{-- Card 1: Info Finansial (Telah Diperbarui) --}}
                 <div class="bg-white rounded-2xl border border-rose-200 shadow-sm overflow-hidden relative">
                     <div class="absolute top-0 right-0 w-16 h-16 bg-rose-50 rounded-bl-full -mr-8 -mt-8 z-0"></div>
                     <div class="px-6 py-4 border-b border-rose-100 bg-rose-50/30 flex items-center gap-2 relative z-10">
@@ -158,11 +185,35 @@ class extends Component {
                         <h3 class="font-bold text-rose-900 text-sm">Informasi Pencairan Dana (Sensitif)</h3>
                     </div>
                     <div class="p-6 relative z-10">
-                        <label class="block text-[10px] font-extrabold text-gray-500 uppercase tracking-wider mb-1.5">Info Rekening Bank / E-Wallet</label>
-                        <input wire:model="info_pencairan" type="text" placeholder="Contoh: GoPay 0812xxx a/n Budi atau BCA 1234xxx a/n Budi" 
-                            class="w-full py-3 px-4 text-sm font-bold text-gray-900 bg-white border border-rose-200 rounded-xl focus:border-rose-500 focus:ring-4 focus:ring-rose-100 transition">
-                        @error('info_pencairan') <span class="text-rose-500 text-[10px] mt-1 font-bold block">{{ $message }}</span> @enderror
-                        <p class="text-[10px] text-gray-400 mt-2 italic">*Dana tarikan (Withdrawal) Anda akan ditransfer ke rekening ini. Jaga kerahasiaan akun Anda.</p>
+                        <label class="block text-[10px] font-extrabold text-gray-500 uppercase tracking-wider mb-2">Info Rekening Bank / E-Wallet</label>
+                        
+                        <div class="flex flex-col sm:flex-row gap-4">
+                            <div class="w-full sm:w-1/3">
+                                <select wire:model.live="nama_bank" class="w-full py-3 px-4 text-sm font-bold text-gray-900 bg-white border border-rose-200 rounded-xl focus:border-rose-500 focus:ring-4 focus:ring-rose-100 transition">
+                                    <option value="BCA">BCA</option>
+                                    <option value="BNI">BNI</option>
+                                    <option value="BRI">BRI</option>
+                                    <option value="Mandiri">Mandiri</option>
+                                    <option value="BJB">BJB</option>
+                                    <option value="GoPay">GoPay</option>
+                                    <option value="OVO">OVO</option>
+                                    <option value="Lainnya">Bank Lainnya...</option>
+                                </select>
+                                @error('nama_bank') <span class="text-rose-500 text-[10px] mt-1 font-bold block">{{ $message }}</span> @enderror
+
+                                @if($nama_bank === 'Lainnya')
+                                    <input wire:model="bank_lainnya" type="text" placeholder="Ketik nama bank..." class="mt-3 w-full py-3 px-4 text-sm font-bold text-gray-900 bg-white border border-rose-200 rounded-xl focus:border-rose-500 focus:ring-4 focus:ring-rose-100 transition">
+                                    @error('bank_lainnya') <span class="text-rose-500 text-[10px] mt-1 font-bold block">{{ $message }}</span> @enderror
+                                @endif
+                            </div>
+
+                            <div class="w-full sm:w-2/3">
+                                <input wire:model="no_rekening" type="text" placeholder="Contoh: 1234567890 (Hanya Angka)" class="w-full py-3 px-4 text-sm font-bold text-gray-900 bg-white border border-rose-200 rounded-xl focus:border-rose-500 focus:ring-4 focus:ring-rose-100 transition">
+                                @error('no_rekening') <span class="text-rose-500 text-[10px] mt-1 font-bold block">{{ $message }}</span> @enderror
+                            </div>
+                        </div>
+
+                        <p class="text-[10px] text-gray-400 mt-3 italic">*Dana tarikan (Withdrawal) Anda akan ditransfer ke rekening ini. Jaga kerahasiaan akun Anda.</p>
                     </div>
                 </div>
 
@@ -203,7 +254,15 @@ class extends Component {
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
                             <div>
                                 <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Nomor Induk Kependudukan (NIK)</label>
-                                <input wire:model="nik" type="text" class="w-full py-2.5 px-4 text-sm font-mono border border-gray-300 rounded-xl focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition">
+                              <input 
+                                    wire:model.defer="nik"
+                                    type="text"
+                                    maxlength="16"
+                                    inputmode="numeric"
+                                    pattern="[0-9]*"
+                                    oninput="this.value=this.value.replace(/\D/g,'').slice(0,16)"
+                                    class="w-full py-2.5 px-4 text-sm font-mono border border-gray-300 rounded-xl focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition"
+                                >
                                 @error('nik') <span class="text-rose-500 text-[10px] mt-1 font-bold block">{{ $message }}</span> @enderror
                             </div>
                             <div>
@@ -217,7 +276,7 @@ class extends Component {
 
             </div>
 
-            {{-- KOLOM KANAN: DOKUMEN & ACTION (Dengan Password) --}}
+            {{-- KOLOM KANAN: DOKUMEN & ACTION --}}
             <div class="lg:col-span-1 space-y-6">
                 
                 {{-- Action Panel (SECURITY GATE) --}}

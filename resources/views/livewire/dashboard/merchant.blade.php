@@ -14,7 +14,11 @@ new
 class extends Component {
     use WithFileUploads;
 
-    public $nama_kantin, $nama_pemilik, $nik, $no_hp, $lokasi_blok, $info_pencairan;
+    public $nama_kantin, $nama_pemilik, $nik, $no_hp, $lokasi_blok;
+
+    public $nama_bank = 'BCA';
+    public $bank_lainnya = '';
+    public $no_rekening = '';
     public $foto_ktp, $foto_kantin;
 
     // State untuk Filter Grafik (Default: Bulan Ini)
@@ -30,7 +34,15 @@ class extends Component {
             $this->nik = $profile->nik;
             $this->no_hp = $profile->no_hp;
             $this->lokasi_blok = $profile->lokasi_blok;
-            $this->info_pencairan = $profile->info_pencairan;
+            $standardBanks = ['BCA', 'BNI', 'BRI', 'Mandiri', 'BJB', 'GoPay', 'OVO'];
+                if (in_array($profile->nama_bank, $standardBanks)) {
+                    $this->nama_bank = $profile->nama_bank;
+                } elseif (!empty($profile->nama_bank)) {
+                    $this->nama_bank = 'Lainnya';
+                    $this->bank_lainnya = $profile->nama_bank;
+                }
+
+                $this->no_rekening = $profile->no_rekening;
         } else {
             $this->nama_pemilik = Auth::user()->name;
         }
@@ -157,10 +169,12 @@ class extends Component {
         $this->validate([
             'nama_kantin'    => 'required|string|max:255',
             'nama_pemilik'   => 'required|string|max:255',
-            'nik'            => 'required|numeric|digits_between:15,17',
+            'nik'            => 'required|digits:16',
             'no_hp'          => 'required|string|max:20',
             'lokasi_blok'    => 'required|string|max:255',
-            'info_pencairan' => 'required|string|max:255',
+            'nama_bank'      => 'required|string',
+            'bank_lainnya'   => 'required_if:nama_bank,Lainnya',
+            'no_rekening'    => 'required|numeric',
             'foto_ktp'       => $this->profile->foto_ktp ? 'nullable|image|max:2048' : 'required|image|max:2048', 
             'foto_kantin'    => $this->profile->foto_kantin ? 'nullable|image|max:2048' : 'required|image|max:2048', 
         ]);
@@ -171,8 +185,12 @@ class extends Component {
             'nik'               => $this->nik,
             'no_hp'             => $this->no_hp,
             'lokasi_blok'       => $this->lokasi_blok,
-            'info_pencairan'    => $this->info_pencairan,
             'status_verifikasi' => 'menunggu_review', 
+            'nama_bank' => $this->nama_bank === 'Lainnya'
+                ? $this->bank_lainnya
+                : $this->nama_bank,
+
+            'no_rekening' => $this->no_rekening,
         ];
 
         if ($this->foto_ktp && !is_string($this->foto_ktp)) {
@@ -228,7 +246,15 @@ class extends Component {
                         </div>
                         <div>
                             <label class="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Nomor Induk Kependudukan (NIK)</label>
-                            <input wire:model="nik" type="text" class="w-full text-sm rounded-xl border-gray-300 focus:border-blue-500 focus:ring-blue-500 py-2.5">
+                            <input 
+                                wire:model.defer="nik"
+                                type="text"
+                                maxlength="16"
+                                inputmode="numeric"
+                                pattern="[0-9]*"
+                                oninput="this.value=this.value.replace(/\D/g,'').slice(0,16)"
+                                class="w-full py-2.5 px-4 text-sm font-mono border border-gray-300 rounded-xl focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition"
+                            >
                             @error('nik') <span class="text-[10px] text-red-500 mt-1 font-bold block">{{ $message }}</span> @enderror
                         </div>
                     </div>
@@ -239,9 +265,62 @@ class extends Component {
                             @error('no_hp') <span class="text-[10px] text-red-500 mt-1 font-bold block">{{ $message }}</span> @enderror
                         </div>
                         <div>
-                            <label class="block text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-1.5">Info Rekening / E-Wallet (Pencairan)</label>
-                            <input wire:model="info_pencairan" type="text" placeholder="Cth: GoPay 0812xxx a/n Budi" class="w-full text-sm rounded-xl border-blue-200 focus:border-blue-500 focus:ring-blue-500 py-2.5 bg-blue-50/30">
-                            @error('info_pencairan') <span class="text-[10px] text-red-500 mt-1 font-bold block">{{ $message }}</span> @enderror
+                            <label class="block text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-1.5">
+                                Rekening / E-Wallet Pencairan
+                            </label>
+
+                            <div class="flex flex-col md:flex-row gap-3">
+
+                                {{-- Jenis Bank --}}
+                                <div class="w-full md:w-1/3">
+                                    <select wire:model.live="nama_bank"
+                                        class="w-full text-sm rounded-xl border-blue-200 focus:border-blue-500 focus:ring-blue-500 py-2.5 bg-blue-50/30">
+
+                                        <option value="BCA">BCA</option>
+                                        <option value="BNI">BNI</option>
+                                        <option value="BRI">BRI</option>
+                                        <option value="Mandiri">Mandiri</option>
+                                        <option value="BJB">BJB</option>
+                                        <option value="GoPay">GoPay</option>
+                                        <option value="OVO">OVO</option>
+                                        <option value="Lainnya">Bank Lainnya...</option>
+                                    </select>
+
+                                    @error('nama_bank')
+                                        <span class="text-[10px] text-red-500 mt-1 font-bold block">
+                                            {{ $message }}
+                                        </span>
+                                    @enderror
+
+                                    @if($nama_bank === 'Lainnya')
+                                        <input wire:model="bank_lainnya"
+                                            type="text"
+                                            placeholder="Nama bank..."
+                                            class="mt-2 w-full text-sm rounded-xl border-blue-200 focus:border-blue-500 focus:ring-blue-500 py-2.5 bg-blue-50/30">
+
+                                        @error('bank_lainnya')
+                                            <span class="text-[10px] text-red-500 mt-1 font-bold block">
+                                                {{ $message }}
+                                            </span>
+                                        @enderror
+                                    @endif
+                                </div>
+
+                                {{-- Nomor Rekening --}}
+                                <div class="w-full md:w-2/3">
+                                    <input wire:model="no_rekening"
+                                        type="text"
+                                        placeholder="Nomor rekening / nomor e-wallet"
+                                        class="w-full text-sm rounded-xl border-blue-200 focus:border-blue-500 focus:ring-blue-500 py-2.5 bg-blue-50/30">
+
+                                    @error('no_rekening')
+                                        <span class="text-[10px] text-red-500 mt-1 font-bold block">
+                                            {{ $message }}
+                                        </span>
+                                    @enderror
+                                </div>
+
+                            </div>
                         </div>
                     </div>
                     <hr class="border-gray-100 my-4">

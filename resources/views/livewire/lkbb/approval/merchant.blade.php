@@ -216,9 +216,18 @@ new #[Layout('layouts.lkbb')] class extends Component {
                                     <span class="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Lokasi Blok</span>
                                     <span class="block text-sm font-bold text-gray-900">{{ $selectedMerchant->lokasi_blok ?? '-' }}</span>
                                 </div>
-                                <div class="bg-gray-50 p-3 rounded-xl border border-gray-100">
-                                    <span class="block text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-1">Info Rekening</span>
-                                    <span class="block text-sm font-bold text-blue-900">{{ $selectedMerchant->info_pencairan ?? '-' }}</span>
+                               <div class="bg-gray-50 p-3 rounded-xl border border-gray-100">
+                                    <span class="block text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-1">
+                                        Info Rekening
+                                    </span>
+                                    <div class="flex flex-col">
+                                        <span class="text-sm font-bold text-blue-900">
+                                            {{ $selectedMerchant->nama_bank ?? '-' }}
+                                        </span>
+                                        <span class="text-[11px] text-gray-500 font-mono mt-0.5">
+                                            {{ $selectedMerchant->no_rekening ?? '-' }}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
 

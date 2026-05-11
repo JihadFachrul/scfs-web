@@ -19,6 +19,8 @@ class MerchantProfile extends Model
         'status_toko',
         'saldo_token',
         'tagihan_setoran_tunai',
+        'nama_bank',
+        'no_rekening',
         
         // --- KOLOM ONBOARDING BARU ---
         'status_verifikasi',
