@@ -92,6 +92,10 @@ Route::middleware(['auth'])->group(function () {
 
     Volt::route('/users', 'lkbb.user-management')->name('users.index');
 
+    Volt::route('/lkbb/injeksi-saldo', 'lkbb.keuangan.injeksi-saldo')->name('lkbb.injeksi-saldo');
+    Volt::route('/lkbb/riwayat-injeksi', 'lkbb.keuangan.riwayat-injeksi')
+    ->name('lkbb.riwayat-injeksi');
+
     // Supply Chain
     Volt::route('/supply-chain/create', 'lkbb.supply-chain.create')->name('supply-chain.create');
     Volt::route('/supply-chain/approval', 'lkbb.supply-chain.approval')->name('supply-chain.approval');

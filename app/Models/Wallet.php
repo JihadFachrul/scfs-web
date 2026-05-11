@@ -11,10 +11,10 @@ class Wallet extends Model
 
     protected $fillable = [
         'user_id',
-        'type',             // <-- BARU: Penanda ini dompet siapa (Mhs/Kantin/LKBB)
+        'type',             // Penanda ini dompet siapa (Mhs/Kantin/Pemasok/LKBB_DONATION, dll)
         'account_number',
         'pin',
-        'balance',          // <-- SUDAH DIGANTI DARI grant_balance
+        'balance',          // Saldo utama dompet
         'is_active',
     ];
 
@@ -32,7 +32,23 @@ class Wallet extends Model
         return $this->hasMany(LedgerEntry::class)->latest();
     }
     
-    // Helper Methods (Biar kodingan nanti lebih enak dibaca)
-    public function isLkbb() { return $this->type === 'LKBB_MASTER'; }
+    // ==========================================
+    // HELPER METHODS (Untuk Cek Tipe Dompet)
+    // ==========================================
+
+    // Cek apakah dompet ini adalah salah satu dari 3 dompet LKBB
+    public function isLkbb() 
+    { 
+        return in_array($this->type, ['LKBB_DONATION', 'LKBB_INVESTMENT', 'LKBB_OPERATIONAL']); 
+    }
+
+    // Cek dompet LKBB secara spesifik
+    public function isLkbbDonation() { return $this->type === 'LKBB_DONATION'; }
+    public function isLkbbInvestment() { return $this->type === 'LKBB_INVESTMENT'; }
+    public function isLkbbOperational() { return $this->type === 'LKBB_OPERATIONAL'; }
+
+    // Cek tipe pengguna di ekosistem
     public function isMerchant() { return $this->type === 'MERCHANT'; }
+    public function isPemasok() { return $this->type === 'PEMASOK'; }
+    public function isMahasiswa() { return $this->type === 'MAHASISWA'; }
 }

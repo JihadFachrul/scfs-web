@@ -53,7 +53,7 @@ class extends Component {
         <div class="bg-white rounded-[2rem] shadow-2xl overflow-hidden w-full max-w-6xl flex min-h-[650px]">
             
             <div class="hidden lg:block w-1/2 relative overflow-hidden">
-                <img src="{{ asset('images/gambar.png') }}" 
+                <img src="{{ asset('images/gambar.jpg') }}" 
                     alt="Gambar Latar"
                     class="absolute inset-0 w-full h-full object-cover object-center">
     
